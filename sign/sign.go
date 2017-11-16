@@ -19,15 +19,17 @@ const (
 	RQversion = "aws4_request"
 	Algorithm = "AWS4-HMAC-SHA256"
 )
+
 func HASH(data string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(data)))
 }
 
 func HMAC(key, data string) string {
-    x := hmac.New(sha256.New, []byte(key))
-    x.Write([]byte(data))
-    return string(x.Sum(nil))
+	x := hmac.New(sha256.New, []byte(key))
+	x.Write([]byte(data))
+	return string(x.Sum(nil))
 }
+
 type Key struct {
 	Access string
 	Secret string
@@ -41,15 +43,11 @@ type Signer struct {
 
 var tohex = hex.EncodeToString
 
-func Gen(t time.Time, secret, region, service string) []byte{
-	return []byte(HMAC(HMAC(HMAC(HMAC("AWS4"+secret, shorttime(t)), region), service), RQversion))
-}
-
 func (k *Signer) Gen(t time.Time) []byte {
 	return Gen(t, k.Key.Secret, k.Region, k.Service)
 }
 
-func (s *Signer) Sign(key []byte, message string) string{
+func (s *Signer) Sign(key []byte, message string) string {
 	return tohex([]byte(HMAC(string(key), message)))
 }
 
@@ -57,13 +55,13 @@ func (s *Signer) SignRequest(r *http.Request) *http.Request {
 	t := time.Now()
 	m := s.createMessage(r, t)
 	k := s.Gen(t)
-	
+
 	sig := s.Sign(k, m)
-	r.Header.Set("Authority", s.Authority(sig, t))
+	r.Header.Set("Authorization", s.Authorization(sig, t))
 	return r
 }
 
-func (s *Signer) Authority(signature string, t time.Time) string {
+func (s *Signer) Authorization(signature string, t time.Time) string {
 	return fmt.Sprintf("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s",
 		Algorithm,
 		s.Key.Access,
@@ -71,6 +69,10 @@ func (s *Signer) Authority(signature string, t time.Time) string {
 		s.Headers,
 		signature,
 	)
+}
+
+func Gen(t time.Time, secret, region, service string) []byte {
+	return []byte(HMAC(HMAC(HMAC(HMAC("AWS4"+secret, shorttime(t)), region), service), RQversion))
 }
 
 func (s *Signer) Scope(t time.Time) string {
