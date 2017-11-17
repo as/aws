@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -15,40 +16,65 @@ import (
 	"time"
 )
 
-const (
-	RQversion = "aws4_request"
-	Algorithm = "AWS4-HMAC-SHA256"
+var (
+	RQversion   = "aws4_request"
+	DefaultHash = HashFunc{
+		Name: "AWS4-HMAC-SHA256",
+		Func: sha256.New,
+	}
 )
-
-func HASH(data string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(data)))
-}
-
-func HMAC(key, data string) string {
-	x := hmac.New(sha256.New, []byte(key))
-	x.Write([]byte(data))
-	return string(x.Sum(nil))
-}
 
 type Key struct {
 	Access string
 	Secret string
 }
 type Signer struct {
-	Region  string
-	Service string
-	Key     Key
-	Headers List
+	Region    string
+	Service   string
+	Key       Key
+	Headers   List
+	Algorithm *HashFunc
+}
+type HashFunc struct {
+	Name string
+	Func func() hash.Hash
+}
+
+func (h HashFunc) String() string {
+	return h.Name
+}
+
+func (s *Signer) hash(msg []byte) []byte {
+	x := s.alg().Func()
+	x.Write(msg)
+	return x.Sum(nil)
+}
+
+func (s *Signer) Mac(key, msg []byte) []byte {
+	return s.mac(key,msg)
+}
+func (s *Signer) mac(key, msg []byte) []byte {
+	x := hmac.New(s.alg().Func, key)
+	x.Write(msg)
+	return x.Sum(nil)
 }
 
 var tohex = hex.EncodeToString
 
-func (k *Signer) Gen(t time.Time) []byte {
-	return Gen(t, k.Key.Secret, k.Region, k.Service)
+func (k *Signer) alg() *HashFunc {
+	if k.Algorithm == nil {
+		x := DefaultHash
+		k.Algorithm = &x
+	}
+	return k.Algorithm
 }
 
-func (s *Signer) Sign(key []byte, message string) string {
-	return tohex([]byte(HMAC(string(key), message)))
+func (s *Signer) Gen(t time.Time) []byte {
+	return Gen(Mac(s.mac), t, s.Key.Secret, s.Region, s.Service)
+}
+
+func (s *Signer) Sign(key []byte, msg string) string {
+	return tohex(s.mac(key, []byte(msg)))
 }
 
 func (s *Signer) SignRequest(r *http.Request) *http.Request {
@@ -63,7 +89,7 @@ func (s *Signer) SignRequest(r *http.Request) *http.Request {
 
 func (s *Signer) Authorization(signature string, t time.Time) string {
 	return fmt.Sprintf("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		Algorithm,
+		s.alg(),
 		s.Key.Access,
 		s.Scope(t),
 		s.Headers,
@@ -71,8 +97,21 @@ func (s *Signer) Authorization(signature string, t time.Time) string {
 	)
 }
 
-func Gen(t time.Time, secret, region, service string) []byte {
-	return []byte(HMAC(HMAC(HMAC(HMAC("AWS4"+secret, shorttime(t)), region), service), RQversion))
+type Mac func([]byte, []byte) []byte
+
+func Gen(mac Mac, t time.Time, secret, region, service string) []byte {
+	return gen(mac, "AWS4"+secret, shorttime(t), region, service, RQversion)
+}
+func gen(mac Mac, input ...string) []byte {
+	if len(input) < 2 {
+		panic("gen: internal error: bad input")
+	}
+	k := []byte(input[0])
+	input = input[1:]
+	for _, m := range input {
+		k = mac(k, []byte(m))
+	}
+	return k
 }
 
 func (s *Signer) Scope(t time.Time) string {
@@ -80,62 +119,65 @@ func (s *Signer) Scope(t time.Time) string {
 }
 
 func (s *Signer) createMessage(r *http.Request, t time.Time) string {
-	return fmt.Sprintf("%s\n%s\n%s\n%s\n",
-		Algorithm,
+	return fmt.Sprintf("%s\n%s\n%s\n%s",
+		s.alg(),
 		longtime(t),
 		s.Scope(t),
 		s.normalize(r, t),
 	)
 }
 
-func (s *Signer) normalizeHeaders(headers http.Header) string {
-	h2 := make(http.Header)
-	seen := make([]string, 0, len(s.Headers))
-	sort.Strings([]string(s.Headers))
-	for _, k := range s.Headers {
-		v := headers.Get(k)
-
-		// Convert all header names to lowercase and remove leading spaces and trailing spaces.
-		k = strings.TrimSpace(strings.ToLower(k))
-
-		// TODO: Convert sequential spaces in the header value to a single space.
-		h2[k] = []string{v}
-
-		seen = append(seen, k)
+func toLowerCopy(h http.Header) http.Header {
+	h2 := make(http.Header, len(h))
+	for k, v := range h {
+		h2[strings.TrimSpace(strings.ToLower(k))] = v
 	}
+	return h2
+}
 
+func (s *Signer) normalizeHeaders(headers http.Header) string {
+	sort.Strings([]string(s.Headers))
+	for i, v := range s.Headers {
+		s.Headers[i] = strings.ToLower(v)
+	}
+	norm := toLowerCopy(headers)
 	buf := new(bytes.Buffer)
-
-	sort.Strings(seen)
-	for _, k := range seen {
+	for _, k := range s.Headers {
+		v, ok := norm[k]
+		if !ok {
+			panic(v)
+		}
 		// Append the lowercase header name followed by a colon.
 		fmt.Fprintf(buf, "%s:", k)
 
 		// Append a comma-separated list of values for that header.
 		// Do not sort the values in headers that have multiple values.
-		values := h2[k]
-		for i, v := range values {
+		semi := ""
+		for _, v := range v {
+			fmt.Fprint(buf, semi)
 			fmt.Fprintf(buf, "%s", v)
-			if i+1 == len(values) {
-				break
-			}
-			fmt.Fprint(buf, ";")
+			semi = ";"
 		}
+
 		// Append a new line ('\n').
-		fmt.Fprint(buf, "\n")
+		fmt.Fprintln(buf)
 	}
+
 	return buf.String()
 }
 
 func (s *Signer) normalize(r *http.Request, t time.Time) string {
 	buf := new(bytes.Buffer)
-	for _, v := range []string{r.Method, r.URL.Path, normURL(r.URL.Query()), s.normalizeHeaders(r.Header), s.Headers.String()} {
+	normParams := normURL(r.URL.Query())
+	normHeaders := s.normalizeHeaders(r.Header)
+
+	for _, v := range []string{r.Method, r.URL.Path, normParams, normHeaders, s.Headers.String()} {
 		fmt.Fprintln(buf, v)
 	}
 	body := ToBuffer(r.Body)
 	r.Body = ioutil.NopCloser(body)
-	fmt.Fprint(buf, HASH(string(body.Bytes())))
-	return HASH(string(buf.Bytes()))
+	fmt.Fprintf(buf, "%x", s.hash(body.Bytes()))
+	return fmt.Sprintf("%x", s.hash(buf.Bytes()))
 }
 
 func ToBuffer(r io.Reader) *bytes.Buffer {

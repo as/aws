@@ -29,7 +29,9 @@ f536975d06c0309214f805bb90ccff089219ecd68b2577efef23edd43b7e1a59`
 func TestGenSignKey(t *testing.T) {
 	tm, _ := time.Parse("20060102", "20150830")
 	want := "c4afb1cc5771d871763a393e44b703571b55cc28424d1a5e86da6ed3c154a4b9"
+	s := &Signer{}
 	have := hex.EncodeToString(Gen(
+		s.Mac,
 		tm,
 		"wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
 		"us-east-1",
