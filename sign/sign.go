@@ -26,12 +26,12 @@ var (
 
 // NewSigner returns a signer for the region+service that signs
 // a request. The given list of headers specifies which http headers
-// are to be signed in a request.
-func NewSigner(region, service string, keys Key, headers ...string) *Signer {
+// are to be signed in a request. 
+func NewSigner(region, service string, keys Key, headers ...string) *Signer{
 	return &Signer{
-		Region:  region,
+		Region: region,
 		Service: service,
-		Key:     Key,
+		Key: keys,
 		Headers: List(headers),
 	}
 }
@@ -39,7 +39,7 @@ func NewSigner(region, service string, keys Key, headers ...string) *Signer {
 // SignRequest signs the http request at the current instance
 // in time, as given by time.Now()
 func (s *Signer) SignRequest(r *http.Request) *http.Request {
-	return SignRequestAt(r*http.Request, time.Now())
+	return s.SignRequestAt(r , time.Now())
 }
 
 // SignRequestAt signs the http request for the given time instance. The
@@ -55,8 +55,8 @@ func (s *Signer) SignRequestAt(r *http.Request, t time.Time) *http.Request {
 
 // SetHeaders sets the headers to be signed in future calls to SignRequest
 // and friends
-func (s *Signer) SetHeaders(header ...string) {
-	s.Headers = List(headers)
+func (s *Signer) SetHeaders(header ...string){
+	s.Headers = List(header)
 }
 
 type Signer struct {
@@ -86,7 +86,7 @@ func (s *Signer) hash(msg []byte) []byte {
 }
 
 func (s *Signer) Mac(key, msg []byte) []byte {
-	return s.mac(key, msg)
+	return s.mac(key,msg)
 }
 func (s *Signer) mac(key, msg []byte) []byte {
 	x := hmac.New(s.alg().Func, key)
@@ -231,6 +231,7 @@ func (k *Signer) alg() *HashFunc {
 	}
 	return k.Algorithm
 }
+
 
 type List []string
 
