@@ -24,16 +24,51 @@ var (
 	}
 )
 
-type Key struct {
-	Access string
-	Secret string
+// NewSigner returns a signer for the region+service that signs
+// a request. The given list of headers specifies which http headers
+// are to be signed in a request. 
+func NewSigner(region, service string, keys Key, headers ...string) *Signer{
+	return &Signer{
+		Region: region,
+		Service: service,
+		Key: Key,
+		Headers: List(headers),
+	}
 }
+
+// SignRequest signs the http request at the current instance
+// in time, as given by time.Now()
+func (s *Signer) SignRequest(r *http.Request) *http.Request {
+	return SignRequestAt(r *http.Request, time.Now())
+}
+
+// SignRequestAt signs the http request for the given time instance. The
+// request is returned immediately but will only be valid at the given time
+func (s *Signer) SignRequestAt(r *http.Request, t time.Time) *http.Request {
+	m := s.createMessage(r, t)
+	k := s.Gen(t)
+
+	sig := s.Sign(k, m)
+	r.Header.Set("Authorization", s.Authorization(sig, t))
+	return r
+}
+
+// SetHeaders sets the headers to be signed in future calls to SignRequest
+// and friends
+func (s *Singer) SetHeaders(header ...string){
+	s.Headers = List(headers)
+}
+
 type Signer struct {
 	Region    string
 	Service   string
 	Key       Key
 	Headers   List
 	Algorithm *HashFunc
+}
+type Key struct {
+	Access string
+	Secret string
 }
 type HashFunc struct {
 	Name string
@@ -61,30 +96,12 @@ func (s *Signer) mac(key, msg []byte) []byte {
 
 var tohex = hex.EncodeToString
 
-func (k *Signer) alg() *HashFunc {
-	if k.Algorithm == nil {
-		x := DefaultHash
-		k.Algorithm = &x
-	}
-	return k.Algorithm
-}
-
 func (s *Signer) Gen(t time.Time) []byte {
 	return Gen(Mac(s.mac), t, s.Key.Secret, s.Region, s.Service)
 }
 
 func (s *Signer) Sign(key []byte, msg string) string {
 	return tohex(s.mac(key, []byte(msg)))
-}
-
-func (s *Signer) SignRequest(r *http.Request) *http.Request {
-	t := time.Now()
-	m := s.createMessage(r, t)
-	k := s.Gen(t)
-
-	sig := s.Sign(k, m)
-	r.Header.Set("Authorization", s.Authorization(sig, t))
-	return r
 }
 
 func (s *Signer) Authorization(signature string, t time.Time) string {
@@ -102,6 +119,10 @@ type Mac func([]byte, []byte) []byte
 func Gen(mac Mac, t time.Time, secret, region, service string) []byte {
 	return gen(mac, "AWS4"+secret, shorttime(t), region, service, RQversion)
 }
+func (s *Signer) Scope(t time.Time) string {
+	return fmt.Sprintf("%s/%s/%s/aws4_request", shorttime(t), s.Region, s.Service)
+}
+
 func gen(mac Mac, input ...string) []byte {
 	if len(input) < 2 {
 		panic("gen: internal error: bad input")
@@ -112,10 +133,6 @@ func gen(mac Mac, input ...string) []byte {
 		k = mac(k, []byte(m))
 	}
 	return k
-}
-
-func (s *Signer) Scope(t time.Time) string {
-	return fmt.Sprintf("%s/%s/%s/aws4_request", shorttime(t), s.Region, s.Service)
 }
 
 func (s *Signer) createMessage(r *http.Request, t time.Time) string {
@@ -207,6 +224,14 @@ func longtime(t time.Time) string {
 func shorttime(t time.Time) string {
 	return t.UTC().Format("20060102")
 }
+func (k *Signer) alg() *HashFunc {
+	if k.Algorithm == nil {
+		x := DefaultHash
+		k.Algorithm = &x
+	}
+	return k.Algorithm
+}
+
 
 type List []string
 
