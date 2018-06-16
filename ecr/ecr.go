@@ -39,7 +39,7 @@ func init() {
 // ErrNotDocker means the cpuset isnt a docker id
 var (
 	ErrNotDocker = errors.New("cpuset without docker id")
-	ErrNoID = errors.New("phase error: no nested docker id")
+	ErrNoID      = errors.New("phase error: no nested docker id")
 )
 
 type (

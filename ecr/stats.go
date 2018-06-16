@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 )
+
 // Container information
 type Container struct {
 	ID         string `json:"DockerId"`
@@ -64,12 +65,12 @@ func Stats() (c *Container, err error) {
 	}
 
 	var C struct {
-        DesiredStatus string `json:"DesiredStatus"`
-        KnownStatus   string `json:"KnownStatus"`
-        Family        string `json:"Family"`
-        Version       string `json:"Version"`
-        Containers    []*Container
-        Arn string `json:"Arn"`
+		DesiredStatus string `json:"DesiredStatus"`
+		KnownStatus   string `json:"KnownStatus"`
+		Family        string `json:"Family"`
+		Version       string `json:"Version"`
+		Containers    []*Container
+		Arn           string `json:"Arn"`
 	}
 
 	defer r.Body.Close()
@@ -78,11 +79,11 @@ func Stats() (c *Container, err error) {
 	}
 
 	for _, c = range C.Containers {
-		if c.ID == id{
+		if c.ID == id {
 			break
 		}
 	}
-	if c == nil{
+	if c == nil {
 		return nil, ErrNoID
 	}
 	return c, nil
