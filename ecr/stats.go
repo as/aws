@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 )
-
 // Container information
 type Container struct {
 	ID         string `json:"DockerId"`
@@ -56,7 +55,7 @@ func Stats() (c *Container, err error) {
 	}
 	<-ready
 
-	r, err := client.Get(fmt.Sprintf("http://169.254.170.2/v2/stats/%s", id))
+	r, err := client.Get(fmt.Sprintf("http://172.17.0.1:51678/v1/tasks?dockerid=%s", id))
 	if err != nil {
 		return nil, QueryError{err}
 	}
@@ -64,10 +63,27 @@ func Stats() (c *Container, err error) {
 		return nil, QueryError{fmt.Errorf("bad response: %v", c)}
 	}
 
+	var C struct {
+        DesiredStatus string `json:"DesiredStatus"`
+        KnownStatus   string `json:"KnownStatus"`
+        Family        string `json:"Family"`
+        Version       string `json:"Version"`
+        Containers    []*Container
+        Arn string `json:"Arn"`
+	}
+
 	defer r.Body.Close()
-	if err = json.NewDecoder(r.Body).Decode(c); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&C); err != nil {
 		return nil, DataError{err}
 	}
 
+	for _, c = range C.Containers {
+		if c.ID == id{
+			break
+		}
+	}
+	if c == nil{
+		return nil, ErrNoID
+	}
 	return c, nil
 }
