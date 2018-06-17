@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -50,7 +51,7 @@ func Stats() (c *Container, err error) {
 		return nil, ProcFSError{err}
 	}
 
-	id := filepath.Base(string(x))
+	id := filepath.Base(strings.TrimSpace(string(x)))
 	if !containerID.MatchString(id) {
 		return nil, ErrNotDocker
 	}
@@ -60,8 +61,11 @@ func Stats() (c *Container, err error) {
 	if err != nil {
 		return nil, QueryError{err}
 	}
+	defer r.Body.Close()
+
 	if c := r.StatusCode; c != 200 {
-		return nil, QueryError{fmt.Errorf("bad response: %v", c)}
+		data, _ := ioutil.ReadAll(r.Body)
+		return nil, QueryError{fmt.Errorf("bad status: %v\nbody: %s", c, data)}
 	}
 
 	var C struct {
@@ -73,7 +77,6 @@ func Stats() (c *Container, err error) {
 		Arn           string `json:"Arn"`
 	}
 
-	defer r.Body.Close()
 	if err = json.NewDecoder(r.Body).Decode(&C); err != nil {
 		return nil, DataError{err}
 	}
